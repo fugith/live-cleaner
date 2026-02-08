@@ -12,35 +12,60 @@ module.exports = async (req, res) => {
         });
         let html = await response.text();
 
-        // 1. حذف قاع الـ Scripts (باش حتى إعلان ما يقلع)
-        html = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, '');
-
-        // 2. سحب رابط الـ m3u8 الحقيقي من الكود
+        // استخراج رابط الـ m3u8
         const m3u8Match = html.match(/source:\s*["'](https?:\/\/.*\.m3u8.*)["']/);
         const m3u8Url = m3u8Match ? m3u8Match[1] : null;
 
-        if (!m3u8Url) return res.send("Stream Link not found.");
+        if (!m3u8Url) return res.send("Stream not found.");
 
-        // 3. بناء صفحة جديدة 100% نظيفة (ما فيها حتى كود من عندهم)
         res.setHeader('Content-Type', 'text/html');
         res.send(`
             <!DOCTYPE html>
-            <html lang="ar">
+            <html>
             <head>
                 <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
                 <style>
-                    body, html { margin: 0; padding: 0; background: #000; overflow: hidden; }
-                    .video-js { width: 100vw !important; height: 100vh !important; }
+                    body, html { margin: 0; padding: 0; background: #000; overflow: hidden; width: 100%; height: 100%; }
+                    
+                    /* هادي هي اللي تمنع الكليكات البرانية */
+                    .video-wrapper { position: relative; width: 100vw; height: 100vh; }
+                    
+                    /* الطبقة الشفافة تحبس الـ Ads بصح تخلي الـ Controls تاع الفيديو */
+                    .video-js { width: 100% !important; height: 100% !important; }
+                    
+                    /* نـفـورصيو الـ Controls يبانو ديما باش ما تـحتاجش تكليكي وسط الفيديو */
+                    .vjs-has-started .vjs-control-bar { display: flex !important; visibility: visible !important; opacity: 1 !important; }
                 </style>
             </head>
             <body>
-                <video id="clean-player" class="video-js vjs-big-play-centered" controls autoplay></video>
+                <div class="video-wrapper">
+                    <video id="player" class="video-js vjs-big-play-centered" controls playsinline></video>
+                </div>
+
                 <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
                 <script>
-                    var player = videojs('clean-player');
+                    var player = videojs('player', {
+                        autoplay: 'muted', // لازم يكون Muted باش الـ Browser يخليه يخدم وحدو
+                        preload: 'auto',
+                        fluid: true
+                    });
+
                     player.src({ src: '${m3u8Url}', type: 'application/x-mpegURL' });
-                    // منع أي محاولة لفتح popups من الـ Browser
+
+                    // عفسة باش نحيو الـ Popups تماماً حتى لو السكريبت حاول يفتحهم
                     window.open = function() { return null; };
+                    
+                    player.ready(function() {
+                        var promise = player.play();
+                        if (promise !== undefined) {
+                            promise.then(_ => {
+                                // Autoplay بدأ بنجاح
+                            }).catch(error => {
+                                // الـ Browser بلوكا الـ Autoplay (لازم العضو يكليكي مرة وحدة)
+                                console.log("Autoplay blocked, waiting for user interaction");
+                            });
+                        }
+                    });
                 </script>
             </body>
             </html>
