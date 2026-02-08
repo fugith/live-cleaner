@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
     const { id } = req.query;
-    if (!id) return res.send("ID is missing");
+    if (!id) return res.send("ID missing");
 
     const targetUrl = `https://dlhd.link/stream/stream-2.php?id=${id}`;
 
@@ -16,33 +16,15 @@ module.exports = async (req, res) => {
 
         const body = await response.text();
 
-        // محاولة استخراج الرابط بعدة طرق (لأنهم يبدلو الكود دايما)
-        const regexPatterns = [
-            /source:\s*["'](https?:\/\/.*\.m3u8.*)["']/,
-            /file:\s*["'](https?:\/\/.*\.m3u8.*)["']/,
-            /["'](https?:\/\/.*\/playlist\.m3u8.*)["']/
-        ];
+        // 1. استخراج الـ M3U8 حتى لو كان داخل eval أو مقسم
+        // هاد الـ Regex يحوس على أي رابط ينتهي بـ m3u8 وسط الكود
+        const m3u8Regex = /(https?:\/\/[^"']+\.m3u8[^"']*)/g;
+        const matches = body.match(m3u8Regex);
+        let m3u8Url = matches ? matches[0] : null;
 
-        let m3u8Url = null;
-        for (let pattern of regexPatterns) {
-            const match = body.match(pattern);
-            if (match) {
-                m3u8Url = match[1];
-                break;
-            }
-        }
+        if (!m3u8Url) return res.send("Stream not found. DaddyLive security is high.");
 
-        if (!m3u8Url) {
-            // إذا ما لقاش، يقدر يكون الرابط مخفي بـ Base64 (عفسة جديدة يديروها)
-            const base64Match = body.match(/atob\(["']([^"']+)["']\)/);
-            if (base64Match) {
-                m3u8Url = Buffer.from(base64Match[1], 'base64').toString();
-            }
-        }
-
-        if (!m3u8Url) return res.send("Stream not found. DaddyLive updated their security!");
-
-        // بناء الـ Player النظيف
+        // 2. بناء الصفحة "المعقمة" (بلا خماج بلا إعلانات)
         res.setHeader('Content-Type', 'text/html');
         res.send(`
             <!DOCTYPE html>
@@ -50,24 +32,32 @@ module.exports = async (req, res) => {
             <head>
                 <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
                 <style>
-                    body, html { margin: 0; padding: 0; background: #000; overflow: hidden; width: 100%; height: 100%; }
-                    .vjs-big-play-centered .vjs-big-play-button { top: 50%; left: 50%; margin-left: -1.5em; margin-top: -0.75em; }
-                    video { width: 100% !important; height: 100% !important; }
+                    body, html { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+                    .video-js { width: 100vw !important; height: 100vh !important; }
+                    /* حذف أي زر براني يخرج */
+                    .vjs-error-display { display: none !important; }
                 </style>
             </head>
             <body>
-                <video id="p" class="video-js vjs-big-play-centered" controls autoplay playsinline muted></video>
+                <video id="p" class="video-js vjs-big-play-centered" controls playsinline muted></video>
                 <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
                 <script>
-                    var player = videojs('p');
+                    var player = videojs('p', {
+                        autoplay: true,
+                        preload: 'auto',
+                        fluid: true,
+                        html5: { hls: { overrideNative: true } }
+                    });
                     player.src({ src: '${m3u8Url}', type: 'application/x-mpegURL' });
+                    
+                    // قتل أي محاولة لفتح نافذة إعلانية
                     window.open = function() { return null; };
+                    document.onclick = function() { return true; }; 
                 </script>
             </body>
             </html>
         `);
-
     } catch (e) {
-        res.status(500).send("Server Error: " + e.message);
+        res.status(500).send("Error: " + e.message);
     }
 };
