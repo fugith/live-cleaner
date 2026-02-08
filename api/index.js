@@ -2,62 +2,53 @@ const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
     const { id } = req.query;
-    if (!id) return res.send("ID missing");
+    if (!id) return res.status(400).send("No ID");
 
-    const targetUrl = `https://dlhd.link/stream/stream-2.php?id=${id}`;
+    // الرابط السري لي يستعملو السكريبت لي عطيتولي
+    const target = `https://dlhd.link/stream/stream-2.php?id=${id}`;
 
     try {
-        const response = await fetch(targetUrl, {
+        const response = await fetch(target, {
             headers: {
                 'Referer': 'https://daddylive.sx/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
             }
         });
 
-        const body = await response.text();
+        const html = await response.text();
+        
+        // استخراج الرابط باستعمال الطريقة لي في الـ Repo
+        const m3u8Match = html.match(/source:\s*["'](https?:\/\/.*\.m3u8.*)["']/);
+        
+        if (!m3u8Match) return res.send("Stream Not Found. Check ID.");
 
-        // 1. استخراج الـ M3U8 حتى لو كان داخل eval أو مقسم
-        // هاد الـ Regex يحوس على أي رابط ينتهي بـ m3u8 وسط الكود
-        const m3u8Regex = /(https?:\/\/[^"']+\.m3u8[^"']*)/g;
-        const matches = body.match(m3u8Regex);
-        let m3u8Url = matches ? matches[0] : null;
+        const streamUrl = m3u8Match[1];
 
-        if (!m3u8Url) return res.send("Stream not found. DaddyLive security is high.");
-
-        // 2. بناء الصفحة "المعقمة" (بلا خماج بلا إعلانات)
+        // هنا السحر: نبعثو Player نظيف ونمررو الـ Referer عبر المتصفح
         res.setHeader('Content-Type', 'text/html');
         res.send(`
-            <!DOCTYPE html>
             <html>
             <head>
                 <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
-                <style>
-                    body, html { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
-                    .video-js { width: 100vw !important; height: 100vh !important; }
-                    /* حذف أي زر براني يخرج */
-                    .vjs-error-display { display: none !important; }
-                </style>
+                <style>body,html{margin:0;padding:0;background:#000;}</style>
             </head>
             <body>
-                <video id="p" class="video-js vjs-big-play-centered" controls playsinline muted></video>
+                <video id="vid" class="video-js vjs-16-9 vjs-big-play-centered" controls autoplay muted></video>
                 <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
                 <script>
-                    var player = videojs('p', {
-                        autoplay: true,
-                        preload: 'auto',
-                        fluid: true,
-                        html5: { hls: { overrideNative: true } }
+                    var player = videojs('vid');
+                    // الخدعة: نطلبوا الفيديو مع تجاوز الـ CORS
+                    player.src({
+                        src: '${streamUrl}',
+                        type: 'application/x-mpegURL',
+                        withCredentials: false
                     });
-                    player.src({ src: '${m3u8Url}', type: 'application/x-mpegURL' });
-                    
-                    // قتل أي محاولة لفتح نافذة إعلانية
-                    window.open = function() { return null; };
-                    document.onclick = function() { return true; }; 
                 </script>
             </body>
             </html>
         `);
+
     } catch (e) {
-        res.status(500).send("Error: " + e.message);
+        res.status(500).send(e.message);
     }
 };
